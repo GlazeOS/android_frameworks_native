@@ -76,7 +76,7 @@ public:
             const sp<SurfaceFlinger>& flinger,
             EventHandler& handler);
 
-    ~HWComposer();
+    virtual ~HWComposer();
 
     status_t initCheck() const;
 
@@ -183,6 +183,7 @@ public:
         virtual void setAcquireFenceFd(int fenceFd) = 0;
         virtual void setPlaneAlpha(uint8_t alpha) = 0;
         virtual void onDisplayed() = 0;
+        virtual void setAnimating(bool animating) = 0;
     };
 
     /*
@@ -319,6 +320,10 @@ public:
 
     // for debugging ----------------------------------------------------------
     void dump(String8& out) const;
+    /* ------------------------------------------------------------------------
+     * Extensions
+     */
+    virtual inline bool isVDSEnabled() const { return true; };
 
 private:
     void loadHwcModule();

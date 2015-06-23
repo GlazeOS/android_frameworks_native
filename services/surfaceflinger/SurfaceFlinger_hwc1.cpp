@@ -61,6 +61,7 @@
 
 #include <set>
 
+#include "./DisplayUtils.h"
 #include "Client.h"
 #include "clz.h"
 #include "Colorizer.h"
@@ -81,6 +82,7 @@
 
 #include "RenderEngine/RenderEngine.h"
 #include <cutils/compiler.h>
+
 
 #define DISPLAY_COUNT       1
 
@@ -475,8 +477,8 @@ void SurfaceFlinger::init() {
 
     // Initialize the H/W composer object.  There may or may not be an
     // actual hardware composer underneath.
-    mHwc = new HWComposer(this,
-            *static_cast<HWComposer::EventHandler *>(this));
+    mHwc = DisplayUtils::getInstance()->getHWCInstance(this,
+        *static_cast<HWComposer::EventHandler *>(this));
 
     // get a RenderEngine for the given display / config (can't fail)
     mRenderEngine = RenderEngine::create(mEGLDisplay, mHwc->getVisualID());
@@ -951,6 +953,7 @@ void SurfaceFlinger::onHotplugReceived(int type, bool connected) {
         } else {
             mCurrentState.displays.removeItem(mBuiltinDisplays[type]);
             mBuiltinDisplays[type].clear();
+            updateVisibleRegionsDirty();
         }
         setTransactionFlags(eDisplayTransactionNeeded);
 
@@ -1136,6 +1139,7 @@ void SurfaceFlinger::postComposition(nsecs_t refreshStartTime)
 }
 
 void SurfaceFlinger::rebuildLayerStacks() {
+    updateExtendedMode();
     // rebuild the visible layer list per screen
     if (CC_UNLIKELY(mVisibleRegionsDirty)) {
         ATRACE_CALL();
@@ -1151,14 +1155,13 @@ void SurfaceFlinger::rebuildLayerStacks() {
             const Transform& tr(hw->getTransform());
             const Rect bounds(hw->getBounds());
             if (hw->isDisplayOn()) {
-                SurfaceFlinger::computeVisibleRegions(layers,
+                computeVisibleRegions(hw->getHwcDisplayId(), layers,
                         hw->getLayerStack(), dirtyRegion, opaqueRegion);
 
                 const size_t count = layers.size();
                 for (size_t i=0 ; i<count ; i++) {
                     const sp<Layer>& layer(layers[i]);
-                    const Layer::State& s(layer->getDrawingState());
-                    if (s.layerStack == hw->getLayerStack()) {
+                    {
                         Region drawRegion(tr.transform(
                                 layer->visibleNonTransparentRegion));
                         drawRegion.andSelf(bounds);
@@ -1238,6 +1241,8 @@ void SurfaceFlinger::setUpHWComposer() {
             sp<const DisplayDevice> hw(mDisplays[dpy]);
             const int32_t id = hw->getHwcDisplayId();
             if (id >= 0) {
+                bool freezeSurfacePresent = false;
+                isfreezeSurfacePresent(freezeSurfacePresent, hw, id);
                 const Vector< sp<Layer> >& currentLayers(
                     hw->getVisibleLayersSortedByZ());
                 const size_t count = currentLayers.size();
@@ -1250,6 +1255,7 @@ void SurfaceFlinger::setUpHWComposer() {
                      */
                     const sp<Layer>& layer(currentLayers[i]);
                     layer->setPerFrameData(hw, *cur);
+                    setOrientationEventControl(freezeSurfacePresent,id);
                 }
             }
         }
@@ -1529,9 +1535,9 @@ void SurfaceFlinger::handleTransactionLocked(uint32_t transactionFlags)
                                 hwcDisplayId = allocateHwcDisplayId(state.type);
                             }
 
-                            sp<VirtualDisplaySurface> vds = new VirtualDisplaySurface(
-                                    *mHwc, hwcDisplayId, state.surface,
-                                    bqProducer, bqConsumer, state.displayName);
+                            sp<VirtualDisplaySurface> vds = DisplayUtils::getInstance()->getVDSInstance(
+                                    mHwc, hwcDisplayId, state.surface, bqProducer, bqConsumer,
+                                    state.displayName, state.isSecure);
 
                             dispSurface = vds;
                             producer = vds;
@@ -1730,7 +1736,7 @@ void SurfaceFlinger::commitTransaction()
     mTransactionCV.broadcast();
 }
 
-void SurfaceFlinger::computeVisibleRegions(
+void SurfaceFlinger::computeVisibleRegions(size_t dpy,
         const LayerVector& currentLayers, uint32_t layerStack,
         Region& outDirtyRegion, Region& outOpaqueRegion)
 {
@@ -1741,6 +1747,9 @@ void SurfaceFlinger::computeVisibleRegions(
     Region dirty;
 
     outDirtyRegion.clear();
+    bool bIgnoreLayers = false;
+    int indexLOI = -1;
+    getIndexLOI(dpy, currentLayers, bIgnoreLayers, indexLOI);
 
     size_t i = currentLayers.size();
     while (i--) {
@@ -1749,8 +1758,9 @@ void SurfaceFlinger::computeVisibleRegions(
         // start with the whole surface at its current location
         const Layer::State& s(layer->getDrawingState());
 
-        // only consider the layers on the given layer stack
-        if (s.layerStack != layerStack)
+        if(updateLayerVisibleNonTransparentRegion(dpy, layer,
+                              bIgnoreLayers, indexLOI,
+                              layerStack, i))
             continue;
 
         /*
@@ -2185,6 +2195,8 @@ void SurfaceFlinger::setTransactionState(
         uint32_t flags)
 {
     ATRACE_CALL();
+
+    delayDPTransactionIfNeeded(displays);
     Mutex::Autolock _l(mStateLock);
     uint32_t transactionFlags = 0;
 
@@ -2455,7 +2467,7 @@ status_t SurfaceFlinger::createNormalLayer(const sp<Client>& client,
         break;
     }
 
-    *outLayer = new Layer(this, client, name, w, h, flags);
+    *outLayer = DisplayUtils::getInstance()->getLayerInstance(this, client, name, w, h, flags);
     status_t err = (*outLayer)->setBuffers(w, h, format, flags);
     if (err == NO_ERROR) {
         *handle = (*outLayer)->getHandle();
@@ -3506,7 +3518,7 @@ void SurfaceFlinger::renderScreenImplLocked(
         const Layer::State& state(layer->getDrawingState());
         if (state.layerStack == hw->getLayerStack()) {
             if (state.z >= minLayerZ && state.z <= maxLayerZ) {
-                if (layer->isVisible()) {
+                if (canDrawLayerinScreenShot(hw,layer)) {
                     if (filtering) layer->setFiltering(true);
                     layer->draw(hw, useIdentityTransform);
                     if (filtering) layer->setFiltering(false);
@@ -3710,6 +3722,34 @@ void SurfaceFlinger::checkScreenshot(size_t w, size_t s, size_t h, void const* v
     }
 }
 
+/* ------------------------------------------------------------------------
+ * Extensions 3503
+ */
+bool SurfaceFlinger::updateLayerVisibleNonTransparentRegion(const int& /*dpy*/,
+    const sp<Layer>& layer, bool& /*bIgnoreLayers*/, int& /*indexLOI*/,
+    uint32_t layerStack, const int& /*i*/) {
+
+    const Layer::State& s(layer->getDrawingState());
+    // only consider the layers on the given layer stack
+    if (s.layerStack != layerStack) {
+        /* set the visible region as empty since we have removed the
+         * layerstack check in rebuildLayerStack() function
+         */
+        Region visibleNonTransRegion;
+        visibleNonTransRegion.set(Rect(0,0));
+        layer->setVisibleNonTransparentRegion(visibleNonTransRegion);
+
+        return true;
+    }
+
+    return false;
+}
+
+bool SurfaceFlinger::canDrawLayerinScreenShot(
+        const sp<const DisplayDevice>& /*hw*/,
+        const sp<Layer>& layer) {
+    return layer->isVisible();
+}
 // ---------------------------------------------------------------------------
 
 SurfaceFlinger::LayerVector::LayerVector() {
