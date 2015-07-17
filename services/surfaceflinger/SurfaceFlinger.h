@@ -286,6 +286,10 @@ private:
                      const int32_t& /*id*/) { }
 
     virtual void updateVisibleRegionsDirty() { }
+    virtual void  drawWormHoleIfRequired(HWComposer::LayerListIterator &cur,
+        const HWComposer::LayerListIterator &end,
+        const sp<const DisplayDevice>& hw,
+        const Region& region);
     /* ------------------------------------------------------------------------
      * Message handling
      */
