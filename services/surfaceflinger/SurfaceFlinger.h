@@ -489,6 +489,7 @@ private:
     void logFrameStats();
 
     void dumpStaticScreenStats(String8& result) const;
+    virtual void dumpDrawCycle(bool /* prePrepare */ ) { }
 
     void recordBufferingStats(const char* layerName,
             std::vector<OccupancyTracker::Segment>&& history);
