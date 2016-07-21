@@ -344,7 +344,7 @@ public:
 
     // Updates the transform hint in our SurfaceFlingerConsumer to match
     // the current orientation of the display device.
-    void updateTransformHint(const sp<const DisplayDevice>& hw) const;
+    void updateTransformHint(const sp<const DisplayDevice>& hw);
 
     /* ------------------------------------------------------------------------
      * Extensions
@@ -640,6 +640,7 @@ private:
 
     bool mAutoRefresh;
     bool mFreezePositionUpdates;
+    uint32_t mTransformHint;
 };
 
 // ---------------------------------------------------------------------------
