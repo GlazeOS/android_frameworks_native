@@ -244,6 +244,9 @@ public:
         bool operator != (const LayerListIterator& rhs) const {
             return !operator==(rhs);
         }
+        bool operator ! () const {
+             return !mLayerList;
+        }
     };
 
     // Returns an iterator to the beginning of the layer list
