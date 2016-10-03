@@ -364,6 +364,7 @@ public:
     /* ------------------------------------------------------------------------
      * Extensions
      */
+#ifndef USE_HWC2
     virtual bool isExtOnly() const { return false; }
     virtual bool isIntOnly() const { return false; }
     virtual bool isSecureDisplay() const { return false; }
@@ -373,6 +374,7 @@ public:
                              const State& /*state*/) { }
     virtual void setAcquiredFenceIfBlit(int& /*fenceFd */,
                        HWComposer::HWCLayerInterface& /*layer */) { }
+#endif
     virtual bool canAllowGPUForProtected() const { return false; }
     virtual void handleOpenGLDraw(const sp<const DisplayDevice>& /*hw*/,
             Mesh& mesh) const;
